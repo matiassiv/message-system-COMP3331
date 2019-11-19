@@ -2,6 +2,7 @@ import socket
 import sys
 import time
 import threading
+import datetime as dt
 
 '''This is a simple server socket, that echoes the message from a client, using TCP'''
 
@@ -26,6 +27,7 @@ credDict = {}  #Creates a dictionary to store the accounts for the application
 connections = [] #List for storing active sockets
 users = {}  #Dictionary for matching a socket with their username
 addresses = {} #Dictionary for matching socket with IP address and port
+loginHistory = {} #Key is username, and value is the datetime for the last login
 
 try:
     f = open('credentials.txt', 'r')
@@ -80,11 +82,30 @@ def whoelse(conn):
     for user_conns in connections:
         if user_conns != conn:
             usernames.append(users[user_conns])
-    return ', '.join(usernames)
+    if len(usernames) == 0:
+        return '[Server]: No other users online at the moment.'
+    return '[Server]: Online users: ' + ', '.join(usernames)
 
         
+def whoelsesince(conn, seconds_ago):
+    global users
+    global connections
+    global credDict
+    global addresses
+    global loginHistory
+    now = dt.datetime.now()
+    number_of_seconds = dt.timedelta(seconds=seconds_ago)
+    since_when = now - number_of_seconds
+    myself = users[conn]
+    user_was_logged_in = []
+    for username in loginHistory.keys():
+        if username != myself and loginHistory[username] > since_when:
+            user_was_logged_in.append(username)
+    if len(user_was_logged_in) == 0:
+        return '[Server]: No users has logged in in the last ' + str(seconds_ago) + ' seconds.'
+    else:
+        return '[Server]: Logged in users in the last ' + str(seconds_ago) + ' seconds: ' + ', '.join(user_was_logged_in)
 
-            
 
 '''Handler for incoming client connections'''
 def handle_client(conn):
@@ -92,20 +113,33 @@ def handle_client(conn):
     global connections
     global credDict
     global addresses
+    global loginHistory
     try:
-        welcome = 'Welcome to this messenger service. Please login. \n'
+        welcome = '[Server]: Welcome to this messenger service. Please login. \n'
         conn.sendall(welcome.encode('utf-8'))
         if authenticate(conn):
-            conn.sendall('Chat and have fun!'.encode())
+            conn.sendall('[Server]: Chat and have fun!'.encode())
             while True:
                 data = conn.recv(1024).decode('utf-8')
-                if data == 'logout':
+                data = data.split()
+                if data[0] == 'logout':
                     logout(conn)
                     break
-                elif data == 'whoelse':
+                elif data[0] == 'whoelse':
                     result = whoelse(conn)
                     conn.sendall(result.encode('utf-8'))
+                elif data[0] == 'whoelsesince':
+                    try:
+                        seconds_ago = int(data[1])
+                        result = whoelsesince(conn, seconds_ago)
+                        conn.sendall(result.encode('utf-8'))
+                    except IndexError:
+                        conn.sendall('[Server]: You have to include number of seconds.\n[Server]: Proper command is: "whoelsesince <seconds>"'.encode('utf-8'))
+                    except ValueError:
+                        conn.sendall('[Server]: Second argument must be a number.'.encode('utf-8'))
+    
                 else:
+                    data = ' '.join(data)
                     conn.sendall(('echo: ' + data).encode('utf-8'))
     except ConnectionError:
         print('An error occurred while connecting to ' + str(addresses[conn]) + '.')
@@ -118,8 +152,8 @@ def handle_client(conn):
         if conn in users.keys():
             username = users[conn]
             credDict[username][1] = 0
-        conn.sendall('Your connection has been inactive for too long. '.encode('utf-8'))
-        conn.sendall("You've been logged out.".encode('utf-8'))
+        conn.sendall('[Server]: Your connection has been inactive for too long. '.encode('utf-8'))
+        conn.sendall("[Server]: You've been logged out.".encode('utf-8'))
         conn.close()
         connections.remove(conn)
 
@@ -128,6 +162,7 @@ def authenticate(conn):
     global credDict
     global blockDuration
     global users
+    global loginHistory
     usernamePrompt = 'Enter your username here: '
     conn.sendall(usernamePrompt.encode('utf-8'))
     loginUsername = conn.recv(1024).decode('utf-8')
@@ -144,16 +179,21 @@ def authenticate(conn):
                     success_msg = 'You have successfully logged in!'
                     conn.sendall(success_msg.encode('utf-8'))
                     users[conn] = loginUsername
+                    loginHistory[loginUsername] = dt.datetime.now()
                     return True
+
                 elif credDict[loginUsername][1] == 1:
                     conn.sendall('This account is already logged in.'.encode('utf-8'))
                     return authenticate(conn)
+
                 elif credDict[loginUsername][2] == BLOCKED:
                     conn.sendall('This account is currently blocked, try again later.'.encode('utf-8'))
                     return authenticate(conn)
+
             else:
                 conn.sendall('Incorrect password. Try again.'.encode('utf-8'))
                 login_attempt += 1
+
         conn.sendall(('Too many login attempts. The account has been blocked for '+ str(blockDuration) + ' seconds.').encode('utf-8'))
         credDict[loginUsername][2] = BLOCKED
         time.sleep(blockDuration)

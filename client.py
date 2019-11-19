@@ -2,6 +2,7 @@ import socket
 import sys
 import time
 import threading
+import datetime
 
 serverIP = sys.argv[1]
 serverPort = int(sys.argv[2])
@@ -34,7 +35,7 @@ def send_handler():
     global OPEN
     try:
         while OPEN:
-            send_message = input()
+            send_message = input('> ')
             clientSock.sendall(send_message.encode('utf-8'))
             if send_message == 'logout':
                 clientSock.shutdown(socket.SHUT_WR)
