@@ -106,6 +106,16 @@ def whoelsesince(conn, seconds_ago):
     else:
         return '[Server]: Logged in users in the last ' + str(seconds_ago) + ' seconds: ' + ', '.join(user_was_logged_in)
 
+def broadcast(conn, message):
+    global users
+    global connections
+    broadcaster = users[conn]
+    broadcast = broadcaster + ' (broadcast): ' + message
+    for conns in connections:
+        if conns != conn:
+            conns.sendall(broadcast.encode('utf-8'))
+    
+
 
 '''Handler for incoming client connections'''
 def handle_client(conn):
@@ -121,7 +131,7 @@ def handle_client(conn):
             conn.sendall('[Server]: Chat and have fun!'.encode())
             while True:
                 data = conn.recv(1024).decode('utf-8')
-                data = data.split()
+                data = data.split(' ', 1)
                 if data[0] == 'logout':
                     logout(conn)
                     break
@@ -137,6 +147,12 @@ def handle_client(conn):
                         conn.sendall('[Server]: You have to include number of seconds.\n[Server]: Proper command is: "whoelsesince <seconds>"'.encode('utf-8'))
                     except ValueError:
                         conn.sendall('[Server]: Second argument must be a number.'.encode('utf-8'))
+                elif data[0] == 'broadcast':
+                    if data[1] != '':
+                        print(data[1])
+                        broadcast(conn, data[1])
+
+
     
                 else:
                     data = ' '.join(data)
