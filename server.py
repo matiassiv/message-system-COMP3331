@@ -103,6 +103,6 @@ def authenticate(conn):
 
 
 
-serverSock.listen()   #Server starts listening for connections
+serverSock.listen(5)   #Server starts listening for connections
 accept_connections(serverSock)
 serverSock.close()
