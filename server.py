@@ -57,7 +57,33 @@ def accept_connections(serverSock):
         client_handler = threading.Thread(target=handle_client, args=[clientConn], daemon=True)
         client_handler.start()
         
-            
+def logout(conn):
+    global users
+    global connections
+    global credDict
+    global addresses
+
+    user = users[conn]
+    conn.sendall("You've been logged out.".encode('utf-8'))
+    conn.close()
+    print('Connection is closed')
+    connections.remove(conn)
+    credDict[user][1] = 0
+    
+def whoelse(conn):
+    global users
+    global connections
+    global credDict
+    global addresses
+
+    usernames = []
+    for user_conns in connections:
+        if user_conns != conn:
+            usernames.append(users[user_conns])
+    return ', '.join(usernames)
+
+        
+
             
 
 '''Handler for incoming client connections'''
@@ -74,13 +100,11 @@ def handle_client(conn):
             while True:
                 data = conn.recv(1024).decode('utf-8')
                 if data == 'logout':
-                    user = users[conn]
-                    conn.sendall("You've been logged out.".encode('utf-8'))
-                    conn.close()
-                    print('Connection is closed')
-                    connections.remove(conn)
-                    credDict[user][1] = 0
+                    logout(conn)
                     break
+                elif data == 'whoelse':
+                    result = whoelse(conn)
+                    conn.sendall(result.encode('utf-8'))
                 else:
                     conn.sendall(('echo: ' + data).encode('utf-8'))
     except ConnectionError:
