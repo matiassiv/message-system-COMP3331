@@ -111,11 +111,22 @@ def whoelsesince(conn, seconds_ago):
 def broadcast(conn, message):
     global users
     global connections
+    global blacklist
+    blocked_broadcast = False
     broadcaster = users[conn]
     broadcast = broadcaster + ' (broadcast): ' + message
     for conns in connections:
         if conns != conn and conns in users.keys():
-            conns.sendall(broadcast.encode('utf-8'))
+            other_user = users[conns]
+            if other_user in blacklist.keys():
+                if broadcaster in blacklist[other_user]:
+                    blocked_broadcast = True
+                else:
+                    conns.sendall(broadcast.encode('utf-8'))
+            else:
+                conns.sendall(broadcast.encode('utf-8'))
+    if blocked_broadcast:
+        conn.sendall('[Server]: Some user has blocked you.\n'.encode('utf-8'))
 
 def block_user(conn, user_to_block):
     global credDict
@@ -224,6 +235,7 @@ def handle_client(conn):
                 data = conn.recv(1024).decode('utf-8')
                 data = data.split(' ', 1)
                 if data[0] == 'logout':
+                    broadcast(conn, 'Logged out.')
                     logout(conn)
                     break
                 
@@ -273,12 +285,15 @@ def handle_client(conn):
         if conn in users.keys():
             username = users[conn]
             credDict[username][1] = 0
+            broadcast(conn, 'Logged out.')
+
         conn.close()
         connections.remove(conn)
     except socket.timeout:
         if conn in users.keys():
             username = users[conn]
             credDict[username][1] = 0
+            broadcast(conn, 'Logged out.')
         conn.sendall('[Server]: Your connection has been inactive for too long. '.encode('utf-8'))
         conn.sendall("[Server]: You've been logged out.".encode('utf-8'))
         conn.close()
