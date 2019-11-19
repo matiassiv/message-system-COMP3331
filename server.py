@@ -1,6 +1,7 @@
 import socket
 import sys
 import time
+import threading
 
 '''This is a simple server socket, that echoes the message from a client, using TCP'''
 
@@ -19,11 +20,12 @@ serverAddress = ('localhost', serverPort)
 
 #Added some constants for blocking functionality
 UNBLOCKED = True
-BLOCKED = True
+BLOCKED = False
 
 credDict = {}  #Creates a dictionary to store the accounts for the application
-connections = [] #Dictionary for storing sockets and their corresponding address
+connections = [] #List for storing active sockets
 users = {}  #Dictionary for matching a socket with their username
+addresses = {} #Dictionary for matching socket with IP address and port
 
 try:
     f = open('credentials.txt', 'r')
@@ -45,29 +47,16 @@ def accept_connections(serverSock):
     global users
     global credDict
     global timeout
+    global addresses
     while True:
-        try:
-            clientConn, clientAddr = serverSock.accept()   #Creates a separate connection for communicating with client.
-            print('Connected by', clientAddr)
-            clientConn.settimeout(timeout)
-            connections.append(clientConn)
-            handle_client(clientConn)
-        except ConnectionError:
-            print('An error occurred while connecting to ' + str(clientAddr) + '.')
-            if clientConn in users.keys():
-                username = users[clientConn]
-                credDict[username][1] = 0
-            clientConn.close()
-            connections.remove(clientConn)
-        except socket.timeout:
-            if clientConn in users.keys():
-                username = users[clientConn]
-                credDict[username][1] = 0
-            clientConn.sendall('Your connection has been inactive for too long. '.encode('utf-8'))
-            clientConn.sendall("You've been logged out.".encode('utf-8'))
-            clientConn.close()
-            connections.remove(clientConn)
-            print(connections)
+        clientConn, clientAddr = serverSock.accept()   #Creates a separate connection for communicating with client.
+        print('Connected by', clientAddr)
+        clientConn.settimeout(timeout)
+        connections.append(clientConn)
+        addresses[clientConn] = clientAddr
+        client_handler = threading.Thread(target=handle_client, args=[clientConn], daemon=True)
+        client_handler.start()
+        
             
             
 
@@ -76,22 +65,39 @@ def handle_client(conn):
     global users
     global connections
     global credDict
-    welcome = 'Welcome to this messenger service. Please login. \n'
-    conn.sendall(welcome.encode('utf-8'))
-    if authenticate(conn):
-        conn.sendall('Chat and have fun!'.encode())
-        while True:
-            data = conn.recv(1024).decode('utf-8')
-            if data == 'logout':
-                user = users[conn]
-                conn.sendall("You've been logged out.".encode('utf-8'))
-                conn.close()
-                print('Connection is closed')
-                connections.remove(conn)
-                credDict[user][1] = 0
-                break
-            else:
-                conn.sendall(('echo: ' + data).encode('utf-8'))
+    global addresses
+    try:
+        welcome = 'Welcome to this messenger service. Please login. \n'
+        conn.sendall(welcome.encode('utf-8'))
+        if authenticate(conn):
+            conn.sendall('Chat and have fun!'.encode())
+            while True:
+                data = conn.recv(1024).decode('utf-8')
+                if data == 'logout':
+                    user = users[conn]
+                    conn.sendall("You've been logged out.".encode('utf-8'))
+                    conn.close()
+                    print('Connection is closed')
+                    connections.remove(conn)
+                    credDict[user][1] = 0
+                    break
+                else:
+                    conn.sendall(('echo: ' + data).encode('utf-8'))
+    except ConnectionError:
+        print('An error occurred while connecting to ' + str(addresses[conn]) + '.')
+        if conn in users.keys():
+            username = users[conn]
+            credDict[username][1] = 0
+        conn.close()
+        connections.remove(conn)
+    except socket.timeout:
+        if conn in users.keys():
+            username = users[conn]
+            credDict[username][1] = 0
+        conn.sendall('Your connection has been inactive for too long. '.encode('utf-8'))
+        conn.sendall("You've been logged out.".encode('utf-8'))
+        conn.close()
+        connections.remove(conn)
 
 '''Lets only authenticated users log in'''
 def authenticate(conn):
