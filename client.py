@@ -2,6 +2,7 @@ import socket
 import sys
 import time
 import threading
+import datetime
 
 serverIP = sys.argv[1]
 serverPort = int(sys.argv[2])
@@ -18,7 +19,7 @@ def recv_handler():
             recv_message = clientSock.recv(1024)
             if recv_message:
                 print(recv_message.decode('utf-8'))
-                if recv_message.decode('utf-8') == "You've been logged out.":
+                if recv_message.decode('utf-8') == "[Server]: You've been logged out.":
                     clientSock.shutdown(socket.SHUT_WR)
                     OPEN = False
                     break
@@ -34,7 +35,7 @@ def send_handler():
     global OPEN
     try:
         while OPEN:
-            send_message = input()
+            send_message = input('> ')
             clientSock.sendall(send_message.encode('utf-8'))
             if send_message == 'logout':
                 clientSock.shutdown(socket.SHUT_WR)
