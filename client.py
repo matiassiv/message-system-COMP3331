@@ -19,7 +19,7 @@ def recv_handler():
             recv_message = clientSock.recv(1024)
             if recv_message:
                 print(recv_message.decode('utf-8'))
-                if recv_message.decode('utf-8') == "You've been logged out.":
+                if recv_message.decode('utf-8') == "[Server]: You've been logged out.":
                     clientSock.shutdown(socket.SHUT_WR)
                     OPEN = False
                     break

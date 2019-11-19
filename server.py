@@ -28,6 +28,8 @@ connections = [] #List for storing active sockets
 users = {}  #Dictionary for matching a socket with their username
 addresses = {} #Dictionary for matching socket with IP address and port
 loginHistory = {} #Key is username, and value is the datetime for the last login
+pendingMessages = {} #Key is recipient and value is a list of tuples of the form (sender, message)
+blacklist = {}  #Key is user and value is a list of blocked usernames
 
 try:
     f = open('credentials.txt', 'r')
@@ -112,9 +114,98 @@ def broadcast(conn, message):
     broadcaster = users[conn]
     broadcast = broadcaster + ' (broadcast): ' + message
     for conns in connections:
-        if conns != conn:
+        if conns != conn and conns in users.keys():
             conns.sendall(broadcast.encode('utf-8'))
+
+def block_user(conn, user_to_block):
+    global credDict
+    global users
+    global blacklist
+    myself = users[conn]
+    if user_to_block == myself:
+        conn.sendall('[Server]: You cannot block yourself.'.encode('utf-8'))
+        return
+    try:
+        if user_to_block in blacklist[myself]:
+            conn.sendall('[Server]: User is already blocked.'.encode('utf-8'))
+            return
+        for usernames in credDict.keys():
+            if user_to_block == usernames:
+                blacklist[myself].append(user_to_block)
+                conn.sendall(('[Server]: ' + user_to_block + ' has been blocked.').encode('utf-8'))
+                return
+        conn.sendall('[Server]: This user is invalid.'.encode('utf-8'))
+        return
+        
+    except KeyError:
+        #Case where blacklist is empty for myself
+        blacklist[myself] = [user_to_block]
+        conn.sendall(('[Server]: ' + user_to_block + ' has been blocked.').encode('utf-8'))
+        return
+
+def unblock_user(conn, user_to_unblock):
+    global credDict
+    global users
+    global blacklist
+    myself = users[conn]
+    if user_to_unblock not in credDict.keys():
+        conn.sendall('[Server]: This user is invalid.'.encode('utf-8'))
+        return
+    if myself in blacklist.keys():
+        if user_to_unblock in blacklist[myself]:
+            blacklist[myself].remove(user_to_unblock)
+            conn.sendall(('[Server]: ' + user_to_unblock + ' has been unblocked.').encode('utf-8'))
+            return
+    conn.sendall('[Server]: This user is not blocked.'.encode())
+
+            
     
+def offline_message_user(sender, recipient, message):
+    global pendingMessages
+    #pendingMessages[recipient] = []
+    try:
+        pendingMessages[recipient].append((sender, message))
+    except KeyError:
+        pendingMessages[recipient] = [(sender, message)]
+
+
+def send_pending_messages(conn, username):
+    global pendingMessages
+    if username in pendingMessages.keys():
+        conn.sendall('[Server]: Here are your messages from when you were offline:\n'.encode('utf-8'))
+        while len(pendingMessages[username]) > 0:
+            element = pendingMessages[username].pop(0)
+            sender, message = element[0], element[1]
+            conn.sendall(('<' + sender +'>: ' + message + '\n').encode('utf-8'))
+
+
+
+
+def message_user(conn, recipient, message):
+    global users
+    global connections
+    global credDict
+    global pendingMessages
+    global blacklist
+    sender = users[conn]
+    if recipient == sender:
+        conn.sendall('[Server]: Message cannot be sent to self'.encode('utf-8'))
+        return
+    for username in credDict.keys():
+        if recipient == username:
+            for sensitive_person in blacklist.keys():
+                if recipient == sensitive_person:
+                    if sender in blacklist[recipient]:
+                        conn.sendall('[Server]: This user has blocked you'.encode('utf-8'))
+                        return
+            for recipient_socket, user in users.items():
+                if recipient == user and recipient_socket in connections:
+                    recipient_socket.sendall(('<' + sender +'>: ' + message).encode('utf-8'))
+                    return
+            conn.sendall('[Server]: User is currently not online.'.encode('utf-8'))
+            offline_message_user(sender, recipient, message)
+            return
+    conn.sendall('[Server]: This is not a valid user.'.encode('utf-8'))
 
 
 '''Handler for incoming client connections'''
@@ -135,9 +226,11 @@ def handle_client(conn):
                 if data[0] == 'logout':
                     logout(conn)
                     break
+                
                 elif data[0] == 'whoelse':
                     result = whoelse(conn)
                     conn.sendall(result.encode('utf-8'))
+                
                 elif data[0] == 'whoelsesince':
                     try:
                         seconds_ago = int(data[1])
@@ -147,16 +240,34 @@ def handle_client(conn):
                         conn.sendall('[Server]: You have to include number of seconds.\n[Server]: Proper command is: "whoelsesince <seconds>"'.encode('utf-8'))
                     except ValueError:
                         conn.sendall('[Server]: Second argument must be a number.'.encode('utf-8'))
+                
                 elif data[0] == 'broadcast':
                     if data[1] != '':
-                        print(data[1])
                         broadcast(conn, data[1])
-
-
-    
+                    else:
+                        conn.sendall('[Server]: Not enough arguments given. \n[Server]: Proper syntax is "broadcast <message>"'.encode('utf-8'))
+                
+                elif data[0] == 'message':
+                    try:
+                        args = data[1].split(' ', 1)
+                        recipient, msg = args[0], args[1]
+                        message_user(conn, recipient, msg)
+                    except IndexError:
+                        conn.sendall('[Server]: Not enough arguments given. \n[Server]: Proper syntax is "message <user> <message>"'.encode('utf-8'))
+                
+                elif data[0] == 'block':
+                    if data[1] != '':
+                        block_user(conn, data[1])
+                    else:
+                        conn.sendall('[Server]: Not enough arguments given. \n[Server]: Proper syntax is "block <user>"'.encode('utf-8'))
+                
+                elif data[0] == 'unblock':
+                    if data[1] != '':
+                        unblock_user(conn, data[1])
+                    else:
+                        conn.sendall('[Server]: Not enough arguments given. \n[Server]: Proper syntax is "unblock <user>"'.encode('utf-8'))
                 else:
-                    data = ' '.join(data)
-                    conn.sendall(('echo: ' + data).encode('utf-8'))
+                    conn.sendall('[Server]: Not a valid command.'.encode('utf-8'))
     except ConnectionError:
         print('An error occurred while connecting to ' + str(addresses[conn]) + '.')
         if conn in users.keys():
@@ -196,6 +307,8 @@ def authenticate(conn):
                     conn.sendall(success_msg.encode('utf-8'))
                     users[conn] = loginUsername
                     loginHistory[loginUsername] = dt.datetime.now()
+                    broadcast(conn, 'I have logged in!')
+                    send_pending_messages(conn, loginUsername)
                     return True
 
                 elif credDict[loginUsername][1] == 1:
