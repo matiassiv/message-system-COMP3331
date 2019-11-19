@@ -22,7 +22,7 @@ UNBLOCKED = True
 BLOCKED = True
 
 credDict = {}  #Creates a dictionary to store the accounts for the application
-connections = {} #Dictionary for storing sockets and their corresponding address
+connections = [] #Dictionary for storing sockets and their corresponding address
 users = {}  #Dictionary for matching a socket with their username
 
 try:
@@ -44,21 +44,37 @@ def accept_connections(serverSock):
     global connections
     global users
     global credDict
+    global timeout
     while True:
         try:
             clientConn, clientAddr = serverSock.accept()   #Creates a separate connection for communicating with client.
             print('Connected by', clientAddr)
-            connections[clientConn] = clientAddr
+            clientConn.settimeout(timeout)
+            connections.append(clientConn)
             handle_client(clientConn)
         except ConnectionError:
             print('An error occurred while connecting to ' + str(clientAddr) + '.')
             if clientConn in users.keys():
                 username = users[clientConn]
-                credDict[username][1] = 0 
+                credDict[username][1] = 0
+            clientConn.close()
+            connections.remove(clientConn)
+        except socket.timeout:
+            if clientConn in users.keys():
+                username = users[clientConn]
+                credDict[username][1] = 0
+            clientConn.sendall('Your connection has been inactive for too long. '.encode('utf-8'))
+            clientConn.sendall("You've been logged out.".encode('utf-8'))
+            clientConn.close()
+            connections.remove(clientConn)
+            print(connections)
+            
+            
 
 '''Handler for incoming client connections'''
 def handle_client(conn):
     global users
+    global connections
     global credDict
     welcome = 'Welcome to this messenger service. Please login. \n'
     conn.sendall(welcome.encode('utf-8'))
@@ -70,7 +86,8 @@ def handle_client(conn):
                 user = users[conn]
                 conn.sendall("You've been logged out.".encode('utf-8'))
                 conn.close()
-                print('connection is closed')
+                print('Connection is closed')
+                connections.remove(conn)
                 credDict[user][1] = 0
                 break
             else:
