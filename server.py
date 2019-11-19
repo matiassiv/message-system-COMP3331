@@ -42,6 +42,8 @@ serverSock.bind(serverAddress)  #Binds our server socket to the server address.
 '''Lets us accept incoming client connections'''
 def accept_connections(serverSock):
     global connections
+    global users
+    global credDict
     while True:
         try:
             clientConn, clientAddr = serverSock.accept()   #Creates a separate connection for communicating with client.
@@ -50,6 +52,9 @@ def accept_connections(serverSock):
             handle_client(clientConn)
         except ConnectionError:
             print('An error occurred while connecting to ' + str(clientAddr) + '.')
+            if clientConn in users.keys():
+                username = users[clientConn]
+                credDict[username][1] = 0 
 
 '''Handler for incoming client connections'''
 def handle_client(conn):
@@ -70,7 +75,6 @@ def handle_client(conn):
                 break
             else:
                 conn.sendall(('echo: ' + data).encode('utf-8'))
-        
 
 '''Lets only authenticated users log in'''
 def authenticate(conn):
