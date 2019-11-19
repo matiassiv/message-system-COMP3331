@@ -17,6 +17,10 @@ timeout = int(sys.argv[3])
 
 serverAddress = ('localhost', serverPort)
 
+#Added some constants for blocking functionality
+UNBLOCKED = True
+BLOCKED = True
+
 credDict = {}  #Creates a dictionary to store the accounts for the application
 connections = {} #Dictionary for storing sockets and their corresponding address
 users = {}  #Dictionary for matching a socket with their username
@@ -26,7 +30,7 @@ try:
     for line in f:
         account = line.split()
         username, password = account[0], account[1]
-        credDict[username] = [password, 0]                  #Saves the account in the dictionary
+        credDict[username] = [password, 0, UNBLOCKED]                  #Saves the account in the dictionary
 except:
     print('Cannot find file "credentials.txt"')
 
@@ -39,10 +43,13 @@ serverSock.bind(serverAddress)  #Binds our server socket to the server address.
 def accept_connections(serverSock):
     global connections
     while True:
-        clientConn, clientAddr = serverSock.accept()   #Creates a separate connection for communicating with client.
-        print('Connected by', clientAddr)
-        connections[clientConn] = clientAddr
-        handle_client(clientConn)
+        try:
+            clientConn, clientAddr = serverSock.accept()   #Creates a separate connection for communicating with client.
+            print('Connected by', clientAddr)
+            connections[clientConn] = clientAddr
+            handle_client(clientConn)
+        except ConnectionError:
+            print('An error occurred while connecting to ' + str(clientAddr) + '.')
 
 '''Handler for incoming client connections'''
 def handle_client(conn):
@@ -80,29 +87,38 @@ def authenticate(conn):
             passwordPrompt = 'Enter your password here: '
             conn.sendall(passwordPrompt.encode('utf-8'))
             loginPassword = conn.recv(1024).decode('utf-8')
-            if (credDict[loginUsername][0] == loginPassword) and (credDict[loginUsername][1] == 0):
-                credDict[loginUsername][1] = 1
-                success_msg = 'You have successfully logged in!'
-                conn.sendall(success_msg.encode('utf-8'))
-                users[conn] = loginUsername
-                return True
-            elif (credDict[loginUsername][0] == loginPassword) and (credDict[loginUsername][1] == 1):
-                conn.sendall('This account is already logged in.'.encode('utf-8'))
-                return authenticate(conn)
+            if credDict[loginUsername][0] == loginPassword:
+                if credDict[loginUsername][1] == 0 and credDict[loginUsername][2] == UNBLOCKED:
+                    credDict[loginUsername][1] = 1
+                    success_msg = 'You have successfully logged in!'
+                    conn.sendall(success_msg.encode('utf-8'))
+                    users[conn] = loginUsername
+                    return True
+                elif credDict[loginUsername][1] == 1:
+                    conn.sendall('This account is already logged in.'.encode('utf-8'))
+                    return authenticate(conn)
+                elif credDict[loginUsername][2] == BLOCKED:
+                    conn.sendall('This account is currently blocked, try again later.'.encode('utf-8'))
+                    return authenticate(conn)
             else:
                 conn.sendall('Incorrect password. Try again.'.encode('utf-8'))
                 login_attempt += 1
-        conn.sendall(('Too many login attempts. You have been blocked for '+ str(blockDuration) + ' seconds.').encode('utf-8'))
+        conn.sendall(('Too many login attempts. The account has been blocked for '+ str(blockDuration) + ' seconds.').encode('utf-8'))
+        credDict[loginUsername][2] = BLOCKED
         time.sleep(blockDuration)
-        authenticate(conn)
+        credDict[loginUsername][2] = UNBLOCKED
+        return authenticate(conn)
     else:
         conn.sendall(('Cannot find user with that username. Please try again.').encode('utf-8'))
-        authenticate(conn)
+        return authenticate(conn)
 
 
 
 
-
-serverSock.listen(5)   #Server starts listening for connections
-accept_connections(serverSock)
-serverSock.close()
+try:
+    serverSock.listen(5)   #Server starts listening for connections
+    accept_connections(serverSock)
+    serverSock.close()
+except KeyboardInterrupt:
+    serverSock.close()
+    print('Server manually shutdown.')
