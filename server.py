@@ -23,20 +23,20 @@ serverAddress = ('localhost', serverPort)
 UNBLOCKED = True
 BLOCKED = False
 
-credDict = {}  #Creates a dictionary to store the accounts for the application
+credDict = {}  #Creates a dictionary to store the accounts for the application. Key is username and value is a list [password, loggedIn(bool), blocked(bool)]
 connections = [] #List for storing active sockets
 users = {}  #Dictionary for matching a socket with their username
 addresses = {} #Dictionary for matching socket with IP address and port
 loginHistory = {} #Key is username, and value is the datetime for the last login
 pendingMessages = {} #Key is recipient and value is a list of tuples of the form (sender, message)
-blacklist = {}  #Key is user and value is a list of blocked usernames
+blacklist = {}  #Key is user and value is a list of blacklisted usernames
 
 try:
     f = open('credentials.txt', 'r')
     for line in f:
         account = line.split()
         username, password = account[0], account[1]
-        credDict[username] = [password, 0, UNBLOCKED]                  #Saves the account in the dictionary
+        credDict[username] = [password, 0, UNBLOCKED]     #Stores the content of credentials.txt in credDict + info about login and blocking
 except:
     print('Cannot find file "credentials.txt"')
 
@@ -54,13 +54,14 @@ def accept_connections(serverSock):
     global addresses
     while True:
         clientConn, clientAddr = serverSock.accept()   #Creates a separate connection for communicating with client.
-        print('Connected by', clientAddr)
+        #print('Connected by', clientAddr)
         clientConn.settimeout(timeout)
         connections.append(clientConn)
         addresses[clientConn] = clientAddr
-        client_handler = threading.Thread(target=handle_client, args=[clientConn], daemon=True)
+        client_handler = threading.Thread(target=handle_client, args=[clientConn], daemon=True)  #Starts a new thread to handle the client
         client_handler.start()
         
+'''Procedure to successfully log out user. Cleans up connections list and sets user to not active (0) in credDict'''
 def logout(conn):
     global users
     global connections
@@ -70,10 +71,12 @@ def logout(conn):
     user = users[conn]
     conn.sendall("You've been logged out.".encode('utf-8'))
     conn.close()
-    print('Connection is closed')
+    #print('Connection is closed')
     connections.remove(conn)
     credDict[user][1] = 0
     
+'''Function to implement the whoelse command. Goes through currently active connections 
+   and matches them with appropriate username (excludes the person who made the command).'''
 def whoelse(conn):
     global users
     global connections
@@ -88,7 +91,9 @@ def whoelse(conn):
         return '[Server]: No other users online at the moment.'
     return '[Server]: Online users: ' + ', '.join(usernames)
 
-        
+
+'''Function to implement the whoelsesince command. Uses the loginHistory dict and returns all users
+   that has logged in in the last seconds_ago seconds.'''       
 def whoelsesince(conn, seconds_ago):
     global users
     global connections
@@ -108,6 +113,8 @@ def whoelsesince(conn, seconds_ago):
     else:
         return '[Server]: Logged in users in the last ' + str(seconds_ago) + ' seconds: ' + ', '.join(user_was_logged_in)
 
+'''Broadcasts a message to all users who have not blocked the broadcaster.
+   Also used to implement the presence notifications'''
 def broadcast(conn, message):
     global users
     global connections
@@ -128,6 +135,7 @@ def broadcast(conn, message):
     if blocked_broadcast:
         conn.sendall('[Server]: Some user has blocked you.\n'.encode('utf-8'))
 
+'''Function to implement user blocking. Checks that user is valid and if so adds the user to the blacklist dict'''
 def block_user(conn, user_to_block):
     global credDict
     global users
@@ -154,6 +162,7 @@ def block_user(conn, user_to_block):
         conn.sendall(('[Server]: ' + user_to_block + ' has been blocked.').encode('utf-8'))
         return
 
+'''Adds unblocking functionality'''
 def unblock_user(conn, user_to_unblock):
     global credDict
     global users
@@ -170,7 +179,8 @@ def unblock_user(conn, user_to_unblock):
     conn.sendall('[Server]: This user is not blocked.'.encode())
 
             
-    
+'''Subroutine in the message_user function. Allows for the server to store the message in the pendingMessages dict.
+   This can then be used to send messages to a user who has received messages when he was offline.'''    
 def offline_message_user(sender, recipient, message):
     global pendingMessages
     #pendingMessages[recipient] = []
@@ -180,6 +190,7 @@ def offline_message_user(sender, recipient, message):
         pendingMessages[recipient] = [(sender, message)]
 
 
+'''Function to actually send the pending messages to a user when he logs in'''
 def send_pending_messages(conn, username):
     global pendingMessages
     if username in pendingMessages.keys():
@@ -191,7 +202,8 @@ def send_pending_messages(conn, username):
 
 
 
-
+'''Implements the message functionality. Checks if user is valid and if the user is online.
+   If user is offline, the message is sent to be stored in pendingMessages.'''
 def message_user(conn, recipient, message):
     global users
     global connections
@@ -219,7 +231,7 @@ def message_user(conn, recipient, message):
     conn.sendall('[Server]: This is not a valid user.'.encode('utf-8'))
 
 
-'''Handler for incoming client connections'''
+'''Handler for incoming client connections. This function implements the logic part of handling the connected clients'''
 def handle_client(conn):
     global users
     global connections
@@ -229,21 +241,23 @@ def handle_client(conn):
     try:
         welcome = '[Server]: Welcome to this messenger service. Please login. \n'
         conn.sendall(welcome.encode('utf-8'))
-        if authenticate(conn):
-            conn.sendall('[Server]: Chat and have fun!'.encode())
+        if authenticate(conn):    #Checks that the connection is logged in with valid credentials
+            conn.sendall('[Server]: Chat and have fun!\n'.encode())
             while True:
+                #This loop checks for commands sent by the user. If they correspond to a valid command, then the corresponding
+                #subroutine is called. These subroutines are implemented above.
                 data = conn.recv(1024).decode('utf-8')
                 data = data.split(' ', 1)
-                if data[0] == 'logout':
+                if data[0] == 'logout':   #Logout func
                     broadcast(conn, 'Logged out.')
                     logout(conn)
                     break
                 
-                elif data[0] == 'whoelse':
+                elif data[0] == 'whoelse':  #Whoelse functionality
                     result = whoelse(conn)
                     conn.sendall(result.encode('utf-8'))
                 
-                elif data[0] == 'whoelsesince':
+                elif data[0] == 'whoelsesince':  #Whoelsesince functionality
                     try:
                         seconds_ago = int(data[1])
                         result = whoelsesince(conn, seconds_ago)
@@ -252,14 +266,14 @@ def handle_client(conn):
                         conn.sendall('[Server]: You have to include number of seconds.\n[Server]: Proper command is: "whoelsesince <seconds>"'.encode('utf-8'))
                     except ValueError:
                         conn.sendall('[Server]: Second argument must be a number.'.encode('utf-8'))
-                
-                elif data[0] == 'broadcast':
+                 
+                elif data[0] == 'broadcast':  #Broadcasting functionality
                     if data[1] != '':
                         broadcast(conn, data[1])
                     else:
                         conn.sendall('[Server]: Not enough arguments given. \n[Server]: Proper syntax is "broadcast <message>"'.encode('utf-8'))
                 
-                elif data[0] == 'message':
+                elif data[0] == 'message': #The message functionality
                     try:
                         args = data[1].split(' ', 1)
                         recipient, msg = args[0], args[1]
@@ -267,21 +281,22 @@ def handle_client(conn):
                     except IndexError:
                         conn.sendall('[Server]: Not enough arguments given. \n[Server]: Proper syntax is "message <user> <message>"'.encode('utf-8'))
                 
-                elif data[0] == 'block':
+                elif data[0] == 'block':   #Blocking functionality
                     if data[1] != '':
                         block_user(conn, data[1])
                     else:
                         conn.sendall('[Server]: Not enough arguments given. \n[Server]: Proper syntax is "block <user>"'.encode('utf-8'))
                 
-                elif data[0] == 'unblock':
+                elif data[0] == 'unblock': #Unblocking functionality
                     if data[1] != '':
                         unblock_user(conn, data[1])
                     else:
                         conn.sendall('[Server]: Not enough arguments given. \n[Server]: Proper syntax is "unblock <user>"'.encode('utf-8'))
                 else:
-                    conn.sendall('[Server]: Not a valid command.'.encode('utf-8'))
+                    conn.sendall('[Server]: Not a valid command.'.encode('utf-8'))   #Sent if no proper commands are catched
     except ConnectionError:
-        print('An error occurred while connecting to ' + str(addresses[conn]) + '.')
+        #print('An error occurred while connecting to ' + str(addresses[conn]) + '.')   
+        #just an error check if some abrupt connectionerror occurs. The user is then marked as logged out, and other users are notified
         if conn in users.keys():
             username = users[conn]
             credDict[username][1] = 0
@@ -289,7 +304,7 @@ def handle_client(conn):
 
         conn.close()
         connections.remove(conn)
-    except socket.timeout:
+    except socket.timeout:     #Uses socket.timeout to implement the timeout functionality of the assignment 
         if conn in users.keys():
             username = users[conn]
             credDict[username][1] = 0
@@ -299,7 +314,9 @@ def handle_client(conn):
         conn.close()
         connections.remove(conn)
 
-'''Lets only authenticated users log in'''
+'''Implements a simple authentication process to log in a user. Checks that user is not already logged in,
+   for correct credentials and that the user hasn't made too many login attempts. If login is successful
+   then a presence notification is broadcasted to the other online users.'''
 def authenticate(conn):
     global credDict
     global blockDuration
@@ -322,7 +339,7 @@ def authenticate(conn):
                     conn.sendall(success_msg.encode('utf-8'))
                     users[conn] = loginUsername
                     loginHistory[loginUsername] = dt.datetime.now()
-                    broadcast(conn, 'I have logged in!')
+                    broadcast(conn, 'I have logged in!')   #Uses the broadcast function for presence notification
                     send_pending_messages(conn, loginUsername)
                     return True
 
@@ -352,8 +369,8 @@ def authenticate(conn):
 
 try:
     serverSock.listen(5)   #Server starts listening for connections
-    accept_connections(serverSock)
+    accept_connections(serverSock)   #Runs the loop to accept connections.
     serverSock.close()
-except KeyboardInterrupt:
+except KeyboardInterrupt:   #For stopping the server manually
     serverSock.close()
     print('Server manually shutdown.')
